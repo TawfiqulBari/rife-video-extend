@@ -7,7 +7,11 @@ from pathlib import Path
 import threading
 from typing import Optional
 
-from config import SUPPORTED_FORMATS, check_dependencies, ensure_directories
+from config import (
+    SUPPORTED_FORMATS, check_dependencies, ensure_directories,
+    get_runpod_api_key, get_runpod_endpoint_id, save_runpod_config,
+    check_continuation_dependencies
+)
 from processor import get_video_info, process_video, VideoInfo
 
 
@@ -17,23 +21,31 @@ class RIFEExtenderApp(ctk.CTk):
 
         # Window setup
         self.title("RIFE Video Extender")
-        self.geometry("500x650")
-        self.minsize(450, 620)
+        self.geometry("500x750")
+        self.minsize(450, 700)
 
         # Set theme
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        # State
+        # Common state
         self.input_path: Optional[Path] = None
         self.video_info: Optional[VideoInfo] = None
-        self.multiplier = ctk.IntVar(value=4)
         self.is_processing = False
         self.cancel_requested = False
+
+        # Slow-motion state
+        self.multiplier = ctk.IntVar(value=4)
+
+        # Continuation state
+        self.continuation_duration = ctk.DoubleVar(value=2.0)
+        self.concat_original = ctk.BooleanVar(value=True)
+        self.save_credentials = ctk.BooleanVar(value=False)
 
         # Build UI
         self._create_widgets()
         self._check_dependencies()
+        self._load_saved_credentials()
 
     def _create_widgets(self):
         # Main container with padding
@@ -50,22 +62,22 @@ class RIFEExtenderApp(ctk.CTk):
 
         self.subtitle_label = ctk.CTkLabel(
             self.main_frame,
-            text="AI-powered slow-motion for your videos",
+            text="AI-powered video enhancement",
             font=ctk.CTkFont(size=12),
             text_color="gray"
         )
-        self.subtitle_label.pack(pady=(0, 20))
+        self.subtitle_label.pack(pady=(0, 15))
 
         # File selection area
-        self.file_frame = ctk.CTkFrame(self.main_frame, height=120)
-        self.file_frame.pack(fill="x", pady=(0, 15))
+        self.file_frame = ctk.CTkFrame(self.main_frame, height=100)
+        self.file_frame.pack(fill="x", pady=(0, 10))
         self.file_frame.pack_propagate(False)
 
         self.file_button = ctk.CTkButton(
             self.file_frame,
             text="Click to Select Video\nor Drag & Drop",
             font=ctk.CTkFont(size=14),
-            height=100,
+            height=80,
             command=self._select_file,
             fg_color="transparent",
             border_width=2,
@@ -76,7 +88,7 @@ class RIFEExtenderApp(ctk.CTk):
 
         # Video info display
         self.info_frame = ctk.CTkFrame(self.main_frame)
-        self.info_frame.pack(fill="x", pady=(0, 15))
+        self.info_frame.pack(fill="x", pady=(0, 10))
 
         self.info_label = ctk.CTkLabel(
             self.info_frame,
@@ -84,50 +96,26 @@ class RIFEExtenderApp(ctk.CTk):
             font=ctk.CTkFont(size=12),
             text_color="gray"
         )
-        self.info_label.pack(pady=15)
+        self.info_label.pack(pady=10)
 
-        # Multiplier selection
-        self.mult_frame = ctk.CTkFrame(self.main_frame)
-        self.mult_frame.pack(fill="x", pady=(0, 15))
+        # Mode selection tabs
+        self.mode_tabview = ctk.CTkTabview(self.main_frame, height=280)
+        self.mode_tabview.pack(fill="x", pady=(0, 10))
 
-        self.mult_label = ctk.CTkLabel(
-            self.mult_frame,
-            text="Slow-Motion Multiplier:",
-            font=ctk.CTkFont(size=14, weight="bold")
-        )
-        self.mult_label.pack(pady=(15, 10))
+        # Create tabs
+        self.slowmo_tab = self.mode_tabview.add("Slow-Motion")
+        self.continue_tab = self.mode_tabview.add("AI Continuation")
 
-        self.mult_buttons_frame = ctk.CTkFrame(self.mult_frame, fg_color="transparent")
-        self.mult_buttons_frame.pack(pady=(0, 15))
-
-        self.mult_buttons = {}
-        for mult in [2, 4, 8]:
-            btn = ctk.CTkRadioButton(
-                self.mult_buttons_frame,
-                text=f"{mult}x",
-                variable=self.multiplier,
-                value=mult,
-                font=ctk.CTkFont(size=14),
-                command=self._update_output_preview
-            )
-            btn.pack(side="left", padx=20)
-            self.mult_buttons[mult] = btn
-
-        # Output preview
-        self.preview_label = ctk.CTkLabel(
-            self.mult_frame,
-            text="",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
-        )
-        self.preview_label.pack(pady=(0, 10))
+        # Build tab contents
+        self._create_slowmo_controls(self.slowmo_tab)
+        self._create_continuation_controls(self.continue_tab)
 
         # Progress section
         self.progress_frame = ctk.CTkFrame(self.main_frame)
-        self.progress_frame.pack(fill="x", pady=(0, 15))
+        self.progress_frame.pack(fill="x", pady=(0, 10))
 
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame)
-        self.progress_bar.pack(fill="x", padx=20, pady=(20, 10))
+        self.progress_bar.pack(fill="x", padx=20, pady=(15, 8))
         self.progress_bar.set(0)
 
         self.status_label = ctk.CTkLabel(
@@ -135,7 +123,7 @@ class RIFEExtenderApp(ctk.CTk):
             text="Ready",
             font=ctk.CTkFont(size=12)
         )
-        self.status_label.pack(pady=(0, 15))
+        self.status_label.pack(pady=(0, 10))
 
         # Action button
         self.action_button = ctk.CTkButton(
@@ -153,12 +141,132 @@ class RIFEExtenderApp(ctk.CTk):
             self.main_frame,
             text="",
             font=ctk.CTkFont(size=11),
-            text_color="red"
+            text_color="red",
+            wraplength=450
         )
         self.warning_label.pack()
 
         # Enable drag and drop using tkinter dnd
         self._setup_drag_drop()
+
+    def _create_slowmo_controls(self, parent):
+        """Create slow-motion specific controls"""
+        # Multiplier selection
+        self.mult_label = ctk.CTkLabel(
+            parent,
+            text="Slow-Motion Multiplier:",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.mult_label.pack(pady=(10, 10))
+
+        self.mult_buttons_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self.mult_buttons_frame.pack(pady=(0, 10))
+
+        self.mult_buttons = {}
+        for mult in [2, 4, 8]:
+            btn = ctk.CTkRadioButton(
+                self.mult_buttons_frame,
+                text=f"{mult}x",
+                variable=self.multiplier,
+                value=mult,
+                font=ctk.CTkFont(size=14),
+                command=self._update_output_preview
+            )
+            btn.pack(side="left", padx=20)
+            self.mult_buttons[mult] = btn
+
+        # Output preview
+        self.slowmo_preview_label = ctk.CTkLabel(
+            parent,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.slowmo_preview_label.pack(pady=(0, 10))
+
+    def _create_continuation_controls(self, parent):
+        """Create video continuation specific controls"""
+        # API Configuration
+        api_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        api_frame.pack(fill="x", padx=5, pady=(5, 5))
+
+        # API Key
+        api_key_label = ctk.CTkLabel(api_frame, text="RunPod API Key:", font=ctk.CTkFont(size=12))
+        api_key_label.grid(row=0, column=0, sticky="w", pady=(0, 5))
+
+        self.api_key_entry = ctk.CTkEntry(api_frame, show="*", width=300)
+        self.api_key_entry.grid(row=0, column=1, padx=(10, 0), pady=(0, 5))
+
+        # Endpoint ID
+        endpoint_label = ctk.CTkLabel(api_frame, text="Endpoint ID:", font=ctk.CTkFont(size=12))
+        endpoint_label.grid(row=1, column=0, sticky="w", pady=(0, 5))
+
+        self.endpoint_entry = ctk.CTkEntry(api_frame, width=300)
+        self.endpoint_entry.grid(row=1, column=1, padx=(10, 0), pady=(0, 5))
+
+        # Save credentials checkbox
+        self.save_creds_check = ctk.CTkCheckBox(
+            api_frame,
+            text="Save credentials locally",
+            variable=self.save_credentials,
+            font=ctk.CTkFont(size=11)
+        )
+        self.save_creds_check.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(0, 5))
+
+        # Prompt
+        prompt_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        prompt_frame.pack(fill="x", padx=5, pady=(0, 5))
+
+        prompt_label = ctk.CTkLabel(prompt_frame, text="Prompt (optional):", font=ctk.CTkFont(size=12))
+        prompt_label.pack(anchor="w")
+
+        self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=50)
+        self.prompt_textbox.pack(fill="x", pady=(5, 0))
+
+        # Options frame
+        options_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        options_frame.pack(fill="x", padx=5, pady=(5, 5))
+
+        # Duration selection
+        duration_label = ctk.CTkLabel(options_frame, text="Duration:", font=ctk.CTkFont(size=12))
+        duration_label.pack(side="left")
+
+        self.duration_2s = ctk.CTkRadioButton(
+            options_frame,
+            text="~2s",
+            variable=self.continuation_duration,
+            value=2.0,
+            font=ctk.CTkFont(size=12)
+        )
+        self.duration_2s.pack(side="left", padx=(10, 5))
+
+        self.duration_4s = ctk.CTkRadioButton(
+            options_frame,
+            text="~4s",
+            variable=self.continuation_duration,
+            value=4.0,
+            font=ctk.CTkFont(size=12)
+        )
+        self.duration_4s.pack(side="left", padx=(5, 20))
+
+        # Concatenation checkbox
+        self.concat_check = ctk.CTkCheckBox(
+            options_frame,
+            text="Append to original",
+            variable=self.concat_original,
+            font=ctk.CTkFont(size=12)
+        )
+        self.concat_check.pack(side="left")
+
+    def _load_saved_credentials(self):
+        """Load saved RunPod credentials if available"""
+        api_key = get_runpod_api_key()
+        endpoint_id = get_runpod_endpoint_id()
+
+        if api_key:
+            self.api_key_entry.insert(0, api_key)
+        if endpoint_id:
+            self.endpoint_entry.insert(0, endpoint_id)
 
     def _setup_drag_drop(self):
         """Setup drag and drop functionality"""
@@ -230,7 +338,7 @@ class RIFEExtenderApp(ctk.CTk):
             self.action_button.configure(state="disabled")
 
     def _update_output_preview(self):
-        """Update the output duration preview"""
+        """Update the output duration preview for slow-motion"""
         if self.video_info:
             mult = self.multiplier.get()
             output_duration = self.video_info.duration * mult
@@ -244,9 +352,13 @@ class RIFEExtenderApp(ctk.CTk):
             else:
                 duration_str = f"{secs:.1f}s"
 
-            self.preview_label.configure(
+            self.slowmo_preview_label.configure(
                 text=f"Output: {duration_str} ({output_frames:,} frames)"
             )
+
+    def _get_current_mode(self) -> str:
+        """Get the currently selected mode tab"""
+        return self.mode_tabview.get()
 
     def _start_processing(self):
         """Start or cancel video processing"""
@@ -260,6 +372,15 @@ class RIFEExtenderApp(ctk.CTk):
         if not self.input_path:
             return
 
+        current_mode = self._get_current_mode()
+
+        if current_mode == "AI Continuation":
+            self._start_continuation_processing()
+        else:
+            self._start_slowmo_processing()
+
+    def _start_slowmo_processing(self):
+        """Start slow-motion processing"""
         # Generate output path
         mult = self.multiplier.get()
         output_path = self.input_path.parent / f"{self.input_path.stem}_slomo{mult}x.mp4"
@@ -294,6 +415,60 @@ class RIFEExtenderApp(ctk.CTk):
         )
         thread.start()
 
+    def _start_continuation_processing(self):
+        """Start AI continuation processing"""
+        # Validate credentials
+        api_key = self.api_key_entry.get().strip()
+        endpoint_id = self.endpoint_entry.get().strip()
+
+        if not api_key:
+            self.status_label.configure(text="Error: RunPod API key required", text_color="red")
+            return
+        if not endpoint_id:
+            self.status_label.configure(text="Error: Endpoint ID required", text_color="red")
+            return
+
+        # Save credentials if requested
+        if self.save_credentials.get():
+            save_runpod_config(api_key, endpoint_id)
+
+        # Generate output path
+        suffix = "_extended" if self.concat_original.get() else "_continued"
+        output_path = self.input_path.parent / f"{self.input_path.stem}{suffix}.mp4"
+
+        # Ask for output location
+        output_file = filedialog.asksaveasfilename(
+            title="Save Output Video As",
+            defaultextension=".mp4",
+            initialfile=output_path.name,
+            initialdir=str(output_path.parent),
+            filetypes=[("MP4 Video", "*.mp4")]
+        )
+
+        if not output_file:
+            return
+
+        output_path = Path(output_file)
+
+        # Get options
+        prompt = self.prompt_textbox.get("1.0", "end-1c").strip()
+        duration = self.continuation_duration.get()
+        concat = self.concat_original.get()
+
+        # Start processing
+        self.is_processing = True
+        self.cancel_requested = False
+        self.action_button.configure(text="Cancel", fg_color="red", hover_color="darkred")
+        self.file_button.configure(state="disabled")
+
+        # Run in thread
+        thread = threading.Thread(
+            target=self._process_continuation_thread,
+            args=(output_path, api_key, endpoint_id, prompt, duration, concat),
+            daemon=True
+        )
+        thread.start()
+
     def _process_video_thread(self, output_path: Path):
         """Process video in background thread"""
         try:
@@ -313,6 +488,49 @@ class RIFEExtenderApp(ctk.CTk):
                 self.after(0, lambda: self._processing_complete(output_path))
             else:
                 self.after(0, lambda: self._processing_failed("Processing failed"))
+
+        except InterruptedError:
+            self.after(0, lambda: self._processing_cancelled())
+        except Exception as e:
+            self.after(0, lambda: self._processing_failed(str(e)))
+
+    def _process_continuation_thread(
+        self,
+        output_path: Path,
+        api_key: str,
+        endpoint_id: str,
+        prompt: str,
+        duration: float,
+        concat: bool
+    ):
+        """Process video continuation in background thread"""
+        from continuation_processor import continue_video, ContinuationOptions
+
+        try:
+            def progress_callback(stage: str, progress: float):
+                if self.cancel_requested:
+                    raise InterruptedError("Cancelled by user")
+                self.after(0, lambda: self._update_progress(stage, progress))
+
+            options = ContinuationOptions(
+                prompt=prompt,
+                duration_seconds=duration,
+                concatenate_original=concat,
+            )
+
+            success = continue_video(
+                input_path=self.input_path,
+                output_path=output_path,
+                api_key=api_key,
+                endpoint_id=endpoint_id,
+                options=options,
+                progress_callback=progress_callback
+            )
+
+            if success:
+                self.after(0, lambda: self._processing_complete(output_path))
+            else:
+                self.after(0, lambda: self._processing_failed("Continuation failed"))
 
         except InterruptedError:
             self.after(0, lambda: self._processing_cancelled())

@@ -51,3 +51,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# API credentials (RunPod)
+.runpod_config

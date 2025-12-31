@@ -2,7 +2,9 @@
 Configuration and paths for RIFE Video Extender
 """
 import os
+import json
 from pathlib import Path
+from typing import Optional
 
 # Base directories
 APP_DIR = Path(__file__).parent.resolve()
@@ -50,5 +52,82 @@ def check_dependencies():
 
     if not FFPROBE_EXE.exists():
         missing.append(f"FFprobe executable not found at: {FFPROBE_EXE}")
+
+    return missing
+
+
+# === Video Continuation (RunPod) Settings ===
+RUNPOD_API_KEY_ENV = "RUNPOD_API_KEY"
+RUNPOD_ENDPOINT_ID_ENV = "RUNPOD_ENDPOINT_ID"
+API_KEY_FILE = APP_DIR / ".runpod_config"
+
+# Default CogVideoX settings
+COGVIDEO_DEFAULTS = {
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "guidance_scale": 6.0,
+}
+
+
+def get_runpod_api_key() -> Optional[str]:
+    """Get RunPod API key from environment or config file"""
+    # 1. Check environment variable (preferred)
+    key = os.environ.get(RUNPOD_API_KEY_ENV)
+    if key:
+        return key
+    # 2. Check config file
+    if API_KEY_FILE.exists():
+        try:
+            with open(API_KEY_FILE, "r") as f:
+                config = json.load(f)
+                return config.get("api_key")
+        except (json.JSONDecodeError, IOError):
+            pass
+    return None
+
+
+def get_runpod_endpoint_id() -> Optional[str]:
+    """Get RunPod endpoint ID from environment or config file"""
+    # 1. Check environment variable (preferred)
+    endpoint_id = os.environ.get(RUNPOD_ENDPOINT_ID_ENV)
+    if endpoint_id:
+        return endpoint_id
+    # 2. Check config file
+    if API_KEY_FILE.exists():
+        try:
+            with open(API_KEY_FILE, "r") as f:
+                config = json.load(f)
+                return config.get("endpoint_id")
+        except (json.JSONDecodeError, IOError):
+            pass
+    return None
+
+
+def save_runpod_config(api_key: str, endpoint_id: str) -> bool:
+    """Save RunPod credentials to config file"""
+    try:
+        config = {"api_key": api_key, "endpoint_id": endpoint_id}
+        with open(API_KEY_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except IOError:
+        return False
+
+
+def check_continuation_dependencies() -> list:
+    """Check if continuation feature dependencies are available"""
+    missing = []
+
+    # Check runpod package
+    try:
+        import runpod
+    except ImportError:
+        missing.append("runpod package not installed (pip install runpod)")
+
+    # Check requests package
+    try:
+        import requests
+    except ImportError:
+        missing.append("requests package not installed (pip install requests)")
 
     return missing
