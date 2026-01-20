@@ -10,7 +10,8 @@ from typing import Optional
 from config import (
     SUPPORTED_FORMATS, check_dependencies, ensure_directories,
     get_replicate_api_token, save_replicate_config,
-    check_continuation_dependencies
+    check_continuation_dependencies,
+    get_saved_prompts, save_prompt, delete_prompt
 )
 from processor import get_video_info, process_video, VideoInfo
 
@@ -206,15 +207,58 @@ class RIFEExtenderApp(ctk.CTk):
         )
         self.save_creds_check.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=(0, 5))
 
-        # Prompt
+        # Prompt section
         prompt_frame = ctk.CTkFrame(parent, fg_color="transparent")
         prompt_frame.pack(fill="x", padx=5, pady=(0, 5))
 
-        prompt_label = ctk.CTkLabel(prompt_frame, text="Prompt (optional):", font=ctk.CTkFont(size=12))
-        prompt_label.pack(anchor="w")
+        # Prompt header with dropdown
+        prompt_header = ctk.CTkFrame(prompt_frame, fg_color="transparent")
+        prompt_header.pack(fill="x")
 
+        prompt_label = ctk.CTkLabel(prompt_header, text="Prompt:", font=ctk.CTkFont(size=12))
+        prompt_label.pack(side="left")
+
+        # Saved prompts dropdown
+        self.prompt_dropdown = ctk.CTkComboBox(
+            prompt_header,
+            values=["(New prompt)"],
+            width=200,
+            command=self._on_prompt_selected,
+            font=ctk.CTkFont(size=11)
+        )
+        self.prompt_dropdown.pack(side="left", padx=(10, 0))
+        self.prompt_dropdown.set("(New prompt)")
+
+        # Save prompt button
+        self.save_prompt_btn = ctk.CTkButton(
+            prompt_header,
+            text="Save",
+            width=50,
+            height=28,
+            font=ctk.CTkFont(size=11),
+            command=self._save_current_prompt
+        )
+        self.save_prompt_btn.pack(side="left", padx=(5, 0))
+
+        # Delete prompt button
+        self.delete_prompt_btn = ctk.CTkButton(
+            prompt_header,
+            text="Del",
+            width=40,
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color="darkred",
+            hover_color="red",
+            command=self._delete_current_prompt
+        )
+        self.delete_prompt_btn.pack(side="left", padx=(5, 0))
+
+        # Prompt textbox
         self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=50)
         self.prompt_textbox.pack(fill="x", pady=(5, 0))
+
+        # Load saved prompts into dropdown
+        self._refresh_prompt_dropdown()
 
         # Options frame
         options_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -250,6 +294,68 @@ class RIFEExtenderApp(ctk.CTk):
             font=ctk.CTkFont(size=12)
         )
         self.concat_check.pack(side="left")
+
+    def _refresh_prompt_dropdown(self):
+        """Refresh the prompt dropdown with saved prompts"""
+        prompts = get_saved_prompts()
+        prompt_names = ["(New prompt)"] + [p["name"] for p in prompts]
+        self.prompt_dropdown.configure(values=prompt_names)
+        self._saved_prompts_cache = {p["name"]: p["text"] for p in prompts}
+
+    def _on_prompt_selected(self, selection: str):
+        """Handle prompt selection from dropdown"""
+        if selection == "(New prompt)":
+            self.prompt_textbox.delete("1.0", "end")
+        elif selection in self._saved_prompts_cache:
+            self.prompt_textbox.delete("1.0", "end")
+            self.prompt_textbox.insert("1.0", self._saved_prompts_cache[selection])
+
+    def _save_current_prompt(self):
+        """Save the current prompt text"""
+        from tkinter import simpledialog
+
+        prompt_text = self.prompt_textbox.get("1.0", "end-1c").strip()
+        if not prompt_text:
+            self.status_label.configure(text="Enter a prompt to save", text_color="orange")
+            return
+
+        # Get current selection as default name
+        current = self.prompt_dropdown.get()
+        default_name = "" if current == "(New prompt)" else current
+
+        # Ask for prompt name
+        name = simpledialog.askstring(
+            "Save Prompt",
+            "Enter a name for this prompt:",
+            initialvalue=default_name,
+            parent=self
+        )
+
+        if name:
+            name = name.strip()
+            if save_prompt(name, prompt_text):
+                self._refresh_prompt_dropdown()
+                self.prompt_dropdown.set(name)
+                self.status_label.configure(text=f"Prompt '{name}' saved", text_color="green")
+            else:
+                self.status_label.configure(text="Failed to save prompt", text_color="red")
+
+    def _delete_current_prompt(self):
+        """Delete the currently selected prompt"""
+        from tkinter import messagebox
+
+        current = self.prompt_dropdown.get()
+        if current == "(New prompt)":
+            return
+
+        if messagebox.askyesno("Delete Prompt", f"Delete prompt '{current}'?", parent=self):
+            if delete_prompt(current):
+                self._refresh_prompt_dropdown()
+                self.prompt_dropdown.set("(New prompt)")
+                self.prompt_textbox.delete("1.0", "end")
+                self.status_label.configure(text=f"Prompt '{current}' deleted", text_color="green")
+            else:
+                self.status_label.configure(text="Failed to delete prompt", text_color="red")
 
     def _load_saved_credentials(self):
         """Load saved Replicate API token if available"""

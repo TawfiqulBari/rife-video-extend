@@ -117,3 +117,53 @@ def check_continuation_dependencies() -> list:
         missing.append("requests package not installed (pip install requests)")
 
     return missing
+
+
+# === Saved Prompts Management ===
+PROMPTS_FILE = APP_DIR / ".saved_prompts.json"
+
+
+def get_saved_prompts() -> list:
+    """Get list of saved prompts. Returns list of dicts with 'name' and 'text' keys."""
+    if not PROMPTS_FILE.exists():
+        return []
+    try:
+        with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("prompts", [])
+    except (json.JSONDecodeError, IOError):
+        return []
+
+
+def save_prompt(name: str, text: str) -> bool:
+    """Save a prompt with the given name. Returns True if successful."""
+    prompts = get_saved_prompts()
+
+    # Check if name already exists, update it
+    for p in prompts:
+        if p["name"] == name:
+            p["text"] = text
+            break
+    else:
+        # Add new prompt
+        prompts.append({"name": name, "text": text})
+
+    try:
+        with open(PROMPTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"prompts": prompts}, f, indent=2, ensure_ascii=False)
+        return True
+    except IOError:
+        return False
+
+
+def delete_prompt(name: str) -> bool:
+    """Delete a saved prompt by name. Returns True if successful."""
+    prompts = get_saved_prompts()
+    prompts = [p for p in prompts if p["name"] != name]
+
+    try:
+        with open(PROMPTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"prompts": prompts}, f, indent=2, ensure_ascii=False)
+        return True
+    except IOError:
+        return False

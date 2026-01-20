@@ -55,3 +55,6 @@ Thumbs.db
 # API credentials
 .replicate_config
 .runpod_config
+
+# User data
+.saved_prompts.json
