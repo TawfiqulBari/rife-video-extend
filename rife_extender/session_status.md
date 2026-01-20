@@ -54,9 +54,22 @@
 - [x] Updated requirements.txt (replicate instead of runpod)
 - [x] Updated documentation (CLAUDE.md)
 
+#### Session 5: Saved Prompts Feature (Completed)
+- [x] Added prompt storage functions to config.py
+  - `get_saved_prompts()` - Load prompts from JSON
+  - `save_prompt(name, text)` - Save/update prompt
+  - `delete_prompt(name)` - Delete prompt
+- [x] Updated gui.py with prompt management UI
+  - Dropdown to select saved prompts
+  - Save button with name dialog
+  - Delete button with confirmation
+  - Prompts auto-load into textbox on selection
+- [x] Added .saved_prompts.json to .gitignore
+- [x] Updated documentation (CLAUDE.md)
+
 ### Pending Sessions
 
-#### Session 5: Polish & Packaging (Not Started)
+#### Session 6: Polish & Packaging (Not Started)
 - [ ] PyInstaller packaging into standalone .exe
 - [ ] Test portable executable on clean system
 - [ ] Create user documentation
@@ -69,6 +82,7 @@
 - [x] File selection works (single dialog)
 - [x] Tabbed interface displays correctly
 - [x] Full continuation end-to-end test (Replicate/Wan 2.2)
+- [x] Saved prompts feature (save/load/delete)
 - [ ] Full slow-motion end-to-end test
 - [ ] Various video format testing
 - [ ] Error handling verification
@@ -84,4 +98,4 @@ Located in `bin/` directory (not tracked in git):
 - Cost: ~$0.05 per generation
 
 ## Last Updated
-2025-01-21 - Session 4 completed, migrated to Replicate with Wan 2.2 I2V Fast model
+2025-01-21 - Session 5 completed, added saved prompts feature with dropdown selection
